@@ -1,0 +1,30 @@
+package com.ktfield.routermanager;
+import android.app.*;
+import android.os.*;
+import android.content.*;
+import android.graphics.Color;
+import android.net.*;
+import android.provider.Settings;
+import android.view.*;
+import android.webkit.*;
+import android.widget.*;
+import java.net.*;
+public class MainActivity extends Activity {
+ LinearLayout root,content; TextView status,result; EditText address; WebView browser;
+ ConnectivityManager cm; String gateway=""; int green=Color.rgb(12,128,107);
+ int dp(int v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
+ TextView label(String t,int size){TextView v=new TextView(this);v.setText(t);v.setTextSize(size);v.setTextColor(Color.rgb(25,42,44));v.setPadding(dp(3),dp(9),dp(3),dp(9));return v;}
+ Button button(String t,Runnable a){Button b=new Button(this);b.setText(t);b.setAllCaps(false);b.setOnClickListener(v->a.run());return b;}
+ void add(Button b){content.addView(b,new LinearLayout.LayoutParams(-1,dp(54)));}
+ @Override public void onCreate(Bundle b){super.onCreate(b);cm=(ConnectivityManager)getSystemService(CONNECTIVITY_SERVICE);home();}
+ void base(String title){root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(Color.WHITE);setContentView(root);TextView h=label(title,22);h.setTextColor(Color.WHITE);h.setBackgroundColor(green);h.setPadding(dp(20),dp(24),dp(16),dp(20));root.addView(h);ScrollView s=new ScrollView(this);root.addView(s,new LinearLayout.LayoutParams(-1,0,1));content=new LinearLayout(this);content.setOrientation(1);content.setPadding(dp(18),dp(12),dp(18),dp(20));s.addView(content);}
+ void home(){base("KT 공유기 매니저");content.addView(label("현장 설치 · AS 네트워크 도구",16));status=label("연결 확인 중",15);content.addView(status);refresh();add(button("연결 정보 새로고침",()->refresh()));add(button("공유기 관리자 접속",()->openRouter()));add(button("네트워크 진단",()->diagnostics()));add(button("Wi-Fi 설정 열기",()->startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS))));add(button("관리 주소 직접 입력",()->manual()));content.addView(label("Wi-Fi 암호, DHCP, 포트포워딩은 관리자 화면에서 설정하세요. 모델별 지원 메뉴가 다릅니다.",13));content.addView(label("관리자 비밀번호는 저장하지 않습니다.",13));}
+ void refresh(){gateway="";StringBuilder sb=new StringBuilder();Network n=cm.getActiveNetwork();NetworkCapabilities cap=n==null?null:cm.getNetworkCapabilities(n);LinkProperties lp=n==null?null:cm.getLinkProperties(n);boolean wifi=cap!=null&&cap.hasTransport(NetworkCapabilities.TRANSPORT_WIFI);sb.append("연결: ").append(wifi?"Wi-Fi":cap==null?"연결 없음":"Wi-Fi 아님").append("\n");if(lp!=null){for(LinkAddress a:lp.getLinkAddresses())if(a.getAddress() instanceof Inet4Address)sb.append("휴대폰 IP: ").append(a.getAddress().getHostAddress()).append("\n");for(RouteInfo r:lp.getRoutes())if(r.isDefaultRoute()&&r.getGateway() instanceof Inet4Address){gateway=r.getGateway().getHostAddress();break;}sb.append("기본 게이트웨이: ").append(gateway.isEmpty()?"확인 불가":gateway).append("\n");for(InetAddress d:lp.getDnsServers())sb.append("DNS: ").append(d.getHostAddress()).append("\n");}sb.append("게이트웨이가 반드시 관리자 IP인 것은 아닙니다.");if(status!=null)status.setText(sb.toString());}
+ void manual(){base("관리 주소 직접 입력");content.addView(label("접속 권한이 있는 공유기 주소를 입력하세요.",15));address=new EditText(this);address.setSingleLine(true);address.setHint("http://172.30.1.254");address.setText(gateway.isEmpty()?"http://homehub.kt.com":"http://"+gateway);content.addView(address);add(button("관리 화면 열기",()->openUrl(address.getText().toString().trim())));add(button("홈",()->home()));}
+ void openRouter(){refresh();if(gateway.isEmpty()){manual();return;}openUrl("http://"+gateway);}
+ boolean localTarget(String raw){try{URI u=new URI(raw);String host=u.getHost();if(host==null)return false;if(host.equalsIgnoreCase("homehub.kt.com"))return true;InetAddress a=InetAddress.getByName(host);return a.isSiteLocalAddress()||a.isLoopbackAddress()||a.isLinkLocalAddress();}catch(Exception e){return false;}}
+ void openUrl(String raw){String url=raw.matches("(?i)^https?://.*")?raw:"http://"+raw;if(!localTarget(url)){new AlertDialog.Builder(this).setMessage("사설 IP 또는 homehub.kt.com 주소만 열 수 있습니다.").setPositiveButton("확인",null).show();return;}base("공유기 관리자 화면");content.addView(label("관리 주소: "+url,13));add(button("홈",()->{if(browser!=null){browser.destroy();browser=null;}home();}));browser=new WebView(this);browser.getSettings().setJavaScriptEnabled(true);browser.getSettings().setDomStorageEnabled(true);browser.getSettings().setAllowFileAccess(false);browser.setWebViewClient(new WebViewClient(){@Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){return !localTarget(r.getUrl().toString());}@Override public void onReceivedError(WebView v,WebResourceRequest r,WebResourceError e){if(r.isForMainFrame())Toast.makeText(MainActivity.this,"연결 실패: 주소와 Wi-Fi를 확인하세요",Toast.LENGTH_LONG).show();}});content.addView(browser,new LinearLayout.LayoutParams(-1,dp(560)));browser.loadUrl(url);}
+ void diagnostics(){refresh();String g=gateway;base("네트워크 진단");result=label("게이트웨이: "+(g.isEmpty()?"없음":g),15);content.addView(result);add(button("TCP 연결 검사",()->{if(g.isEmpty()){result.setText("Wi-Fi 연결을 확인하세요.");return;}result.setText("검사 중...");new Thread(()->{StringBuilder sb=new StringBuilder("대상: "+g+"\n");for(int p:new int[]{80,443}){try(Socket s=new Socket()){s.connect(new InetSocketAddress(g,p),1800);sb.append("TCP "+p+": 연결 가능\n");}catch(Exception e){sb.append("TCP "+p+": 연결 불가 또는 차단\n");}}sb.append("포트 검사만으로 인터넷 장애를 확정할 수 없습니다.");runOnUiThread(()->result.setText(sb.toString()));}).start();}));add(button("홈",()->home()));}
+ @Override public void onBackPressed(){if(browser!=null&&browser.canGoBack()){browser.goBack();return;}if(browser!=null){browser.destroy();browser=null;}home();}
+ @Override protected void onDestroy(){if(browser!=null){browser.destroy();browser=null;}super.onDestroy();}
+}
